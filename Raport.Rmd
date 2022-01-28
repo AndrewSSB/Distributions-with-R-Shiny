@@ -1,0 +1,218 @@
+---
+title: "Raport Proiect"
+runtime: shiny_prerendered
+output: html_document
+---
+
+# Ilustrarea repartitiilor
+
+Acest proiect ilustreaza 15 repartitii si modul in care pot fi utilizate in calcul, alaturi de grafice pentru densitate (functie de masa) si functia de repartitie.
+
+Repartitii ilustrate:
+
+- Normal
+- Beta
+- Chi-squared
+- Exponential
+- F
+- Cauchy
+- Logistic
+- StudentT
+- Uniform
+- Gamma
+- Lognormal
+- Weibull
+- Binomial
+- Poisson
+- Geometric
+
+## UI
+
+Utilizatorul poate alege ce fel de repartitie vrea sa ilustreze folosind un meniu drop-down.
+
+```{r , context="render"}
+selectInput("dist","Choose the probability distribution: ", choices =
+                    list(Continuous = list("Normal"),
+                         Discrete = list()))
+```
+
+Fiecare repartitie are la dispozitie propriile casete de input pentru parametrii lor reprezentativi.
+```{r , context="render"}
+conditionalPanel(
+             condition = "input.dist == 'Normal'",
+             numericInput("mean", "Mean: ", value = 0),
+             numericInput("sd", "Standard deviation: ", value = 1, min=0)
+           )
+```
+
+Graficele vor fi afisate in propriile lor containere din client.
+
+
+Dupa alegerea repartitiei, utilizatorul poate efectua si 3 tipuri de probabilitati.
+```{r , context="render"}
+ fluidRow(
+    column(2,
+         selectInput("probType", "Choose type of probability", 
+                     choices = list("P(X<=a)", "P(X>=a)", "P(a<=X<=b)"))
+    ),
+    column(2,
+         conditionalPanel(
+           condition = "input.probType == 'P(X<=a)'",
+           numericInput("a", "a:", value=0)
+         ),
+         conditionalPanel(
+           condition = "input.probType == 'P(X>=a)'",
+           numericInput("b", "a:", value=0)
+         ),
+         conditionalPanel(
+           condition = "input.probType == 'P(a<=X<=b)'",
+           numericInput("aa", "a:", value=0),
+           numericInput("bb", "b:", value=0)
+         )           
+    )
+ )
+```
+
+## Server
+
+Mai intai am preluat toate datele de la client folosind reactive expressions pentru a avea cele mai noi valori din client.
+```{r ,echo=TRUE, context="server"}
+# Distribution specific vars
+  # Normal
+  nMean<-reactive(input$mean)
+  sd<-reactive(input$sd)
+  dist<-reactive(input$dist) 
+```
+
+Dupa preluarea datelor, am calculat diferite proprietati ale repartitiilor.
+Pentru inceput, am stabilit limitele graficului in functie de repartitie si am definit multimea de valori.
+```{r ,echo=TRUE, context="server"}
+inf<-reactive({
+    switch(input$dist,
+           "Normal"=input$mean-3*input$sd)
+})
+sup<-reactive({
+    switch(input$dist,
+           "Normal"=input$mean+3*input$sd)
+})
+points<-reactive({
+    switch(input$dist,
+           "Normal"=seq(from=inf(),to=sup(),length.out=1000))
+})
+```
+
+Avand multimea de puncte, am calculat densitatea/functia de masa, functia de repartitie si media.
+```{r ,echo=TRUE, context="server"}
+density<-reactive({
+    switch(input$dist,
+           "Normal"=dnorm(points(),input$mean,input$sd))
+  })
+cdf<-reactive({
+    switch(input$dist,
+           "Normal"=pnorm(points(),input$mean,input$sd))
+  })
+mean<-reactive({
+    switch(input$dist,
+           "Normal"=input$mean)
+  })
+```
+
+In final, am pregatit cateva helper functions pentru calculul probabilitatilor.
+```{r ,echo=TRUE, context="server"}
+cdfHelper<-function(x) {
+  reactive({
+      switch(input$dist,
+             "Normal"=pnorm(x,input$mean,input$sd))
+  })
+}
+pdfHelper<-function(x) {
+  reactive({
+      switch(input$dist,
+             "Normal"=dnorm(x,input$mean,input$sd))
+    
+  })
+}
+```
+
+Graficele au fost create cu ajutorul functiei plot(). Unele repartitii au valori ce tind la infinit in densitate. Pentru a rezolva, am facut o verificare inainte de a folosi valoarea si am setat o valoare arbitrara in caz de infinit.
+
+Acest yl este calculat pentru a seta limita maxima a graficului pe axa OY.
+Am folosit abline() pentru a vizualiza unde se situeaza media pe grafic.
+```{r, echo=FALSE}
+plotOutput("densityPlot")
+```
+
+```{r ,echo=TRUE, context="server"}
+output$densityPlot<-renderPlot({
+    currDensity <- density()
+    if (is.infinite(max(currDensity))) {
+      yl<-c(0,4*5/3)
+    } else {
+      yl<-c(0,4*max(currDensity)/3)
+    }
+    plot(points(),currDensity,
+         type="l",
+         col = "cyan3",
+         lwd=2.5,
+         xlab="Values",
+         ylab="PDF",
+         main=input$dist,
+         ylim=yl)
+    abline(v = mean(), col="cyan2",lwd = 2, lty = 2)
+})
+```
+
+```{r, echo=FALSE}
+plotOutput("cdfPlot")
+```
+```{r ,echo=TRUE, context="server"}
+output$cdfPlot<-renderPlot({
+    currCdf <- cdf()
+    plot(points(),currCdf,
+         type="l",
+         col = "cyan3",
+         lwd=2.5,
+         xlab="Values",
+         ylab="CDF",
+         main=dist(),
+         ylim = c(0,1))
+  })
+```
+
+Calculul probabilitatilor se foloseste de acele helper functions generate mai sus.
+```{r ,echo=TRUE, context="server"}
+output$result<-renderText({
+    switch(input$probType,
+           'P(X<=a)' = cdfHelper(input$a)(),
+           'P(X>=a)' = 1 - cdfHelper(input$b)(),
+           'P(a<=X<=b)' = cdfHelper(input$bb)() - cdfHelper(input$aa)()
+           )
+  })
+```
+```{r,echo=FALSE}
+textOutput("result")
+```
+Pentru a hasura suprafata corespunzatoare calculului, am folosit functia polygon() pentru a genera un poligon peste grafic in plot.
+```{r ,echo=TRUE, context="server"}
+output$resultPlot<-renderPlot({
+    switch(input$probType,
+           'P(X<=a)' = {
+               plot(points(),cdf(),
+                    type="l",
+                    col = "cyan3",
+                    lwd=2.5,
+                    xlab="Values",
+                    ylab="CDF",
+                    main=input$dist,
+                    ylim = c(0,1))
+               polygon(c(points()[points()<=input$a], input$a),
+                       c(cdf()[points()<=input$a], cdf()[points()==min(points())]),
+                       col="cyan",
+                       density=10,
+                       angle=90)
+             })
+  })
+```
+```{r, echo=FALSE}
+plotOutput("resultPlot")
+```
